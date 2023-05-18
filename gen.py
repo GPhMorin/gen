@@ -57,6 +57,7 @@ class Gen:
         except KeyError:
             raise ValueError(f"No individual with ID {ind} found.")
 
+    @cache
     def get_ancestors(self, ind: int) -> set:
         """Recursively get all known ancestors of a given individual."""
         if ind in self.ancestor_cache:
