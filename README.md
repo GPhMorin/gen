@@ -21,6 +21,6 @@ So far, this library can:
 * And lots more things!
 
 ## How to Use
-Simply `git clone` this project in the same folder as your Python script, and `from gen import Gen`. Load a pedigree file using Gen('path/to/pedigree.asc').
+Simply `git clone` this project in the same folder as your Python script, and `from gen import Gen`. Load a pedigree file using `Gen('path/to/pedigree.asc')`.
 
 Tested with Python 3.10 and over.
