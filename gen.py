@@ -16,9 +16,7 @@ class Gen:
             self.founders = self._extract_founders()
             self.map = {individual:index for index, individual
                         in enumerate(self.parents.keys())}
-            self.ancestor_cache = {}  # Cache to store ancestors
-            self.inbreeding_cache = {}  # Cache to store coefficients of inbreeding
-
+            
     def _load_parents(self, lines: list) -> dict:
         """Converts lines from the file into a dictionary of parents."""
         parents = {}
