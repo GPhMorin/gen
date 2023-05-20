@@ -16,6 +16,8 @@ class Gen:
             self.founders = self._extract_founders()
             self.map = {individual:index for index, individual
                         in enumerate(self.parents.keys())}
+            self.paths = []
+            self.loops = []
             
     def _load_parents(self, lines: list) -> dict:
         """Converts lines from the file into a dictionary of parents."""
@@ -53,14 +55,11 @@ class Gen:
         try:
             return self.parents[ind]
         except KeyError:
-            raise ValueError(f"No individual with ID {ind} found.")
+            return (None, None)
 
     @cache
     def get_ancestors(self, ind: int) -> set:
         """Recursively get all known ancestors of a given individual."""
-        if ind in self.ancestor_cache:
-            return self.ancestor_cache[ind]
-            
         if not ind:
             return set()
 
@@ -73,7 +72,6 @@ class Gen:
         if mothers_ancestry:
             ancestors |= mothers_ancestry
 
-        self.ancestor_cache[ind] = ancestors  # Save the ancestors in cache
         return ancestors
 
     def get_common_ancestors(self, individuals: list) -> set:
@@ -97,7 +95,7 @@ class Gen:
         """Recursively get all most-recent common ancestors (MRCAs) from a group of individuals."""
         common_ancestors = self.get_common_ancestors([ind1, ind2])
         if not common_ancestors:
-            return None
+            return set()
 
         mrca_set = set.union(*[self.search_mrcas(ancestor, common_ancestors)
                                for ancestor in [ind1, ind2]])
@@ -119,8 +117,8 @@ class Gen:
         if mother:
             self.shortest_path(df, proband, mother, mrca, depth + 1)
 
-    def get_distances(self, probands: list) -> pd.DataFrame:
-        """Get the distances (generations) from each proband to their most-recent common ancestors (MRCAs)."""
+    def get_shortest_distances(self, probands: list) -> pd.DataFrame:
+        """Get the shortest distances (generations) from each proband to their most-recent common ancestors (MRCAs)."""
         all_mrcas = set()
         for ind1 in probands:
             for ind2 in probands:
@@ -147,7 +145,26 @@ class Gen:
 
         df.replace(10000, None, inplace=True)
         return df
-    
+
+    def all_paths(self, df: pd.DataFrame, proband: int, ancestor: int, target_ancestor: int, depth: int) -> None:
+        """Recursively find all paths from a proband to its most-recent common ancestor (MRCA)."""
+        if ancestor in self.visited:
+            return
+        else:
+            self.visited.add(ancestor)
+
+        if ancestor == target_ancestor:
+            if isinstance(df.loc[proband, target_ancestor], list):
+                df.loc[proband, target_ancestor].append(depth)
+            else:
+                df.loc[proband, target_ancestor] = [depth]
+
+        father, mother = self.get_parents(ancestor)
+        if father:
+            self.all_paths(df, proband, father, target_ancestor, depth + 1)
+        if mother:
+            self.all_paths(df, proband, mother, target_ancestor, depth + 1)
+
     def prepare_kinships(self, interests: list) -> None:
         """Prepare the files for IdCoefs (M Abney, 2009)."""
         # Load the file into a pandas DataFrame
@@ -194,18 +211,73 @@ class Gen:
                 visited_parents.add((father, mother))
         return probands
     
-    @cache
-    def get_inbreeding(self, individual: int) -> float:
+    def get_all_paths(self, current: int, target: int, history: list) -> None:
+        '''Find all possible paths from an individual to a common ancestor.'''
+        new_history = history.copy()
+        new_history.append(current)
+        
+        if current == target:
+            self.paths.append(new_history)
+            return
+
+        father, mother = self.get_parents(current)
+
+        # Avoid cycles by not revisiting already visited nodes.
+        if father and father not in history:
+            self.get_all_paths(father, target, new_history)
+        if mother and mother not in history:
+            self.get_all_paths(mother, target, new_history)
+    
+    def get_inbreeding(self, individual: int, in_process: set = None) -> float:
         """Compute the coefficient of inbreeding of a given individual."""
+        if in_process is None:
+            in_process = set()
+
+        if individual in in_process:
+            return 0.
+
+        in_process.add(individual)
+
         father, mother = self.get_parents(individual)
         if not father or not mother:
-            return 0
-        
-        df = self.get_distances([father, mother])
+            return 0.
 
-        coeff = 0
+        common_ancestors = self.get_common_ancestors([father, mother])
+        history = [individual]
 
-        for mrca in df.columns:
-            coeff += 1/2 ** (df.loc[father, mrca] + df.loc[mother, mrca] + 1) * (1 + self.get_inbreeding(mrca))
+        if not common_ancestors:
+            return 0.
+
+        for common_ancestor in common_ancestors:
+            if common_ancestor == individual:
+                continue
+
+            self.get_all_paths(father, common_ancestor, history)
+            self.get_all_paths(mother, common_ancestor, history)
+
+        paths = self.paths.copy()
+        for path1 in paths:
+            for path2 in paths:
+                if path1[1] == father and path2[1] == mother and path2[-1] == path1[-1]:
+                    loop = path1.copy()
+                    path2 = path2.copy()
+                    path2.reverse()
+                    common_ancestor = path2[0]
+                    path2 = path2[1:]
+                    loop.extend(path2)
+                    if len(loop[1:-1]) != len(set(loop[1:-1])):
+                        continue
+                    else:
+                        self.loops.append((common_ancestor, loop))
+
+        coeff = 0.
+        loops = self.loops.copy()
+        for loop in loops:
+            common_ancestor, sequence = loop
+            Fca = self.get_inbreeding(common_ancestor, in_process=in_process)
+            coeff += 0.5 ** (len(sequence) - 2.) * (1. + Fca)
+
+        self.paths.clear()
+        self.loops.clear()
 
         return coeff
