@@ -281,3 +281,44 @@ class Gen:
         self.loops.clear()
 
         return coeff
+    
+    def get_kinship(self, ind1: int, ind2: int) -> float:
+        """Compute the coefficient of kinship between two individuals."""
+        common_ancestors = self.get_common_ancestors([ind1, ind2])
+
+        if not common_ancestors:
+            return 0.
+        
+        for common_ancestor in common_ancestors:
+            if common_ancestor == ind1 or common_ancestor == ind2:
+                continue
+
+            self.get_all_paths(ind1, common_ancestor, history=[])
+            self.get_all_paths(ind2, common_ancestor, history=[])
+
+        paths = self.paths.copy()
+        for path1 in paths:
+            for path2 in paths:
+                if path1[0] == ind1 and path2[0] == ind2 and path2[-1] == path1[-1]:
+                    loop = path1.copy()
+                    path2 = path2.copy()
+                    path2.reverse()
+                    common_ancestor = path2[0]
+                    path2 = path2[1:]
+                    loop.extend(path2)
+                    if len(loop[1:-1]) != len(set(loop[1:-1])):
+                        continue
+                    else:
+                        self.loops.append((common_ancestor, loop))
+
+        coeff = 0.
+        loops = self.loops.copy()
+        for loop in loops:
+            common_ancestor, sequence = loop
+            Fca = self.get_inbreeding(common_ancestor)
+            coeff += 0.5 ** (len(sequence)) * (1. + Fca)
+
+        self.paths.clear()
+        self.loops.clear()
+
+        return coeff
