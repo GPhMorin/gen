@@ -12,10 +12,11 @@ So far, this library can:
 * Intersect all known common ancestors of a set of individuals;
 * Find all known most-recent common ancestors (MRCAs) of two individuals;
 * Find the shortest distances from pairs of individuals to their MRCAs;
-* Extract one member per family (in case you don't want siblings).
+* Extract one member per family (in case you don't want siblings);
+* Compute the inbreeding coefficient of a given individual.
 
 ## What This Cannot Do
-* Compute inbreeding and kinship coefficients;
+* Compute kinship coefficients;
 * Write a cool scientific article for you;
 * Bring back the dead;
 * And lots more things!
