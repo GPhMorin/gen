@@ -2,7 +2,6 @@ import pandas as pd
 from tqdm import tqdm
 import re
 from functools import cache
-import igraph as ig
 
 class Gen:
     """A class to handle genealogical data."""
@@ -19,7 +18,7 @@ class Gen:
                         in enumerate(self.parents.keys())}
             self.paths = []
             self.loops = []
-            self.inbreedings = pd.DataFrame(index=self.parents.keys(), columns=['coeff'])
+            self.inbred = {}
             
     def _load_parents(self, lines: list) -> dict:
         """Converts lines from the file into a dictionary of parents."""
@@ -231,9 +230,9 @@ class Gen:
     
     def get_inbreeding(self, individual: int, in_process: set = None) -> float:
         """Compute the coefficient of inbreeding of a given individual."""
-        if not pd.isna(self.inbreedings.at[individual, 'coeff']):
-            return self.inbreedings.at[individual, 'coeff']
-
+        if individual in self.inbred:
+            return self.inbred[individual]
+        
         if in_process is None:
             in_process = set()
 
@@ -252,12 +251,11 @@ class Gen:
         if not common_ancestors:
             return 0.
         
-        print(f"{len(common_ancestors)} common ancestors")
-
         self.get_all_paths(father, common_ancestors, history)
         self.get_all_paths(mother, common_ancestors, history)
 
         paths = self.paths.copy()
+        self.paths.clear()
         for path1 in paths:
             for path2 in paths:
                 if path1[1] == father and path2[1] == mother and path2[-1] == path1[-1]:
@@ -267,22 +265,21 @@ class Gen:
                     common_ancestor = path2[0]
                     path2 = path2[1:]
                     loop.extend(path2)
-                    if len(loop[1:-1]) != len(set(loop[1:-1])):
+                    if len(loop) - len(set(loop)) != 1:
                         continue
                     else:
                         self.loops.append((common_ancestor, loop))
 
         coeff = 0.
+
         loops = self.loops.copy()
+        self.loops.clear()
         for loop in loops:
             common_ancestor, sequence = loop
             Fca = self.get_inbreeding(common_ancestor, in_process=in_process)
             coeff += 0.5 ** (len(sequence) - 2.) * (1. + Fca)
 
-        self.paths.clear()
-        self.loops.clear()
-
-        self.inbreedings.at[individual, 'coeff'] = coeff
+        self.inbred[individual] = coeff
         return coeff
     
     def get_kinship(self, ind1: int, ind2: int) -> float:
@@ -300,6 +297,7 @@ class Gen:
         self.get_all_paths(ind2, common_ancestors, history=[])
 
         paths = self.paths.copy()
+        self.paths.clear()
         for path1 in paths:
             for path2 in paths:
                 if path1[0] == ind1 and path2[0] == ind2:
@@ -316,91 +314,19 @@ class Gen:
                             self.loops.append((common_ancestor, loop))
 
         coeff = 0.
+
         loops = self.loops.copy()
+        self.loops.clear()
         for loop in loops:
             common_ancestor, sequence = loop
             Fca = self.get_inbreeding(common_ancestor)
             coeff += 0.5 ** (len(sequence)) * (1. + Fca)
-
-        self.paths.clear()
-        self.loops.clear()
 
         return coeff
     
     def preload_inbreedings(self, filename: str=None) -> None:
         """Memoize the inbreedings for faster lookup."""
-        if filename:
-            self.inbreedings = pd.read_csv(filename)
         individuals = list(self.parents.keys())
-        for individual in tqdm(individuals[::-1], desc="Preloading the inbreedings"):
-            if pd.isna(self.inbreedings.at[individual, 'coeff']):
-                self.inbreedings.at[individual, 'coeff'] = self.get_inbreeding(individual)
-        self.inbreedings.to_csv('inbreedings.csv')
-
-class GenGraph:
-    """A class to analyze pedigree data using graph theory."""
-    def __init__(self, filename: str, sep: str='\t') -> None:
-        """Initializes the GenGraph object with a file containing genealogical data."""
-        self.filename = filename
-        pedigree = pd.DataFrame(columns=['ind', 'parent'])
-        with open(filename, 'r') as infile:
-            lines = infile.readlines()[1:]
-            for line in lines:
-                child, father, mother = line.strip().split(sep)
-                if father != 0:
-                    row = {'ind': child, 'parent': father}
-                    pedigree.append(row, ignore_index=True)
-                if mother != 0:
-                    row = {'ind': child, 'parent': mother}
-                    pedigree.append(row, ignore_index=True)
-        self.g = ig.Graph.DataFrame(pedigree)
-
-    def get_common_ancestors(self, individuals: list) -> set:
-        """Get all most-recent common ancestors (MRCAs) from a group of individuals."""
-        ancestors_list = [self.get_ancestors(individual).union({individual})
-                          for individual in individuals]
-        common_ancestors = set.intersection(*ancestors_list)
-        common_ancestors.discard(None)
-        return common_ancestors or None
-        
-    def get_kinship(self, ind1: int, ind2: int) -> float:
-        """Compute the coefficient of kinship between two individuals."""
-        common_ancestors = self.get_common_ancestors([ind1, ind2])
-
-        if not common_ancestors:
-            return 0.
-        
-        if ind1 == ind2:
-            Find = self.get_inbreeding(ind1)
-            return 0.5 * (1 + Find)
-        
-        self.get_all_paths(ind1, common_ancestors, history=[])
-        self.get_all_paths(ind2, common_ancestors, history=[])
-
-        paths = self.paths.copy()
-        for path1 in paths:
-            for path2 in paths:
-                if path1[0] == ind1 and path2[0] == ind2:
-                    if path2[-1] == path1[-1]:
-                        loop = path1.copy()
-                        path2 = path2.copy()
-                        path2.reverse()
-                        common_ancestor = path2[0]
-                        path2 = path2[1:]
-                        loop.extend(path2)
-                        if len(loop[1:-1]) != len(set(loop[1:-1])):
-                            continue
-                        else:
-                            self.loops.append((common_ancestor, loop))
-
-        coeff = 0.
-        loops = self.loops.copy()
-        for loop in loops:
-            common_ancestor, sequence = loop
-            Fca = self.get_inbreeding(common_ancestor)
-            coeff += 0.5 ** (len(sequence)) * (1. + Fca)
-
-        self.paths.clear()
-        self.loops.clear()
-
-        return coeff
+        for individual in tqdm(individuals, desc="Preloading the inbreedings"):
+            if individual not in self.inbred:
+                self.inbred[individual] = self.get_inbreeding(individual)
