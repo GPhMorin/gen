@@ -11,14 +11,13 @@ class Gen:
         self.filename = filename
         with open(filename, 'r') as infile:
             lines = infile.readlines()[1:]
-            self.parents = self._load_parents(lines)
+            self.par = self._load_parents(lines)
             self.pro = self._extract_probands()
-            self.founders = self._extract_founders()
+            self.fon = self._extract_founders()
             self.map = {individual:index for index, individual
-                        in enumerate(self.parents.keys())}
-            self.paths = []
-            self.loops = []
-            self.inbred = {}
+                        in enumerate(self.par.keys())}
+            self.ind1_paths = []
+            self.ind2_paths = []
             
     def _load_parents(self, lines: list) -> dict:
         """Converts lines from the file into a dictionary of parents."""
@@ -33,16 +32,16 @@ class Gen:
 
     def _extract_probands(self) -> list:
         """Extracts the probands as an ordered list."""
-        probands = set(self.parents.keys()) - {parent for ind in self.parents.keys()
-                                               for parent in self.parents[ind]
-                                               if parent and parent in self.parents.keys()}
+        probands = set(self.par.keys()) - {parent for ind in self.par.keys()
+                                           for parent in self.par[ind]
+                                           if parent and parent in self.par.keys()}
         probands = list(probands)
         probands.sort()
         return probands
     
     def _extract_founders(self) -> list:
         """Extracts the founders as an ordered list."""
-        founders = [individual for individual in self.parents.keys()
+        founders = [individual for individual in self.par.keys()
                     if self.get_parents(individual) == (None, None)]
         founders.sort()
         return founders
@@ -54,7 +53,7 @@ class Gen:
     def get_parents(self, ind: int) -> tuple:
         """Get the parents (father, mother) of a given individual."""
         try:
-            return self.parents[ind]
+            return self.par[ind]
         except KeyError:
             return (None, None)
 
@@ -146,26 +145,7 @@ class Gen:
 
         df.replace(10000, None, inplace=True)
         return df
-
-    def all_paths(self, df: pd.DataFrame, proband: int, ancestor: int, target_ancestor: int, depth: int) -> None:
-        """Recursively find all paths from a proband to its most-recent common ancestor (MRCA)."""
-        if ancestor in self.visited:
-            return
-        else:
-            self.visited.add(ancestor)
-
-        if ancestor == target_ancestor:
-            if isinstance(df.at[proband, target_ancestor], list):
-                df.at[proband, target_ancestor].append(depth)
-            else:
-                df.at[proband, target_ancestor] = [depth]
-
-        father, mother = self.get_parents(ancestor)
-        if father:
-            self.all_paths(df, proband, father, target_ancestor, depth + 1)
-        if mother:
-            self.all_paths(df, proband, mother, target_ancestor, depth + 1)
-
+    
     def prepare_kinships(self, interests: list) -> None:
         """Prepare the files for IdCoefs (M Abney, 2009)."""
         # Load the file into a pandas DataFrame
@@ -205,42 +185,36 @@ class Gen:
         """Extract only one proband per family."""
         visited_parents = set()
         probands = []
-        for proband in self.pro:
+        for proband in self.get_probands():
             father, mother = self.get_parents(proband)
             if (father, mother) not in visited_parents:
                 probands.append(proband)
                 visited_parents.add((father, mother))
         return probands
     
-    def get_all_paths(self, current: int, common_ancestors: set, history: list) -> None:
+    def get_all_paths(self, current: int, target_ancestor: int, history: list, pathway: str) -> None:
         '''Find all possible paths from an individual to a set of common ancestors.'''
         new_history = history.copy()
         new_history.append(current)
         
-        if current in common_ancestors:
-            self.paths.append(new_history)
+        if current == target_ancestor:
+            if pathway == 'ind1':
+                self.ind1_paths.append(new_history)
+            elif pathway == 'ind2':
+                self.ind2_paths.append(new_history)
+            return
 
         father, mother = self.get_parents(current)
 
         # Avoid cycles by not revisiting already visited nodes.
         if father and father not in history:
-            self.get_all_paths(father, common_ancestors, new_history)
+            self.get_all_paths(father, target_ancestor, new_history, pathway)
         if mother and mother not in history:
-            self.get_all_paths(mother, common_ancestors, new_history)
+            self.get_all_paths(mother, target_ancestor, new_history, pathway)
     
-    def get_inbreeding(self, individual: int, in_process: set = None) -> float:
+    @cache
+    def get_inbreeding(self, individual: int) -> float:
         """Compute the coefficient of inbreeding of a given individual."""
-        if individual in self.inbred:
-            return self.inbred[individual]
-        
-        if in_process is None:
-            in_process = set()
-
-        if individual in in_process:
-            return 0.
-
-        in_process.add(individual)
-
         father, mother = self.get_parents(individual)
         if not father or not mother:
             return 0.
@@ -251,35 +225,25 @@ class Gen:
         if not common_ancestors:
             return 0.
         
-        self.get_all_paths(father, common_ancestors, history)
-        self.get_all_paths(mother, common_ancestors, history)
+        coeff = 0.
+        
+        for common_ancestor in common_ancestors:
+            self.get_all_paths(father, common_ancestor, history, 'ind1')
+            self.get_all_paths(mother, common_ancestor, history, 'ind2')
 
-        paths = self.paths.copy()
-        self.paths.clear()
-        for path1 in paths:
-            for path2 in paths:
-                if path1[1] == father and path2[1] == mother and path2[-1] == path1[-1]:
-                    loop = path1.copy()
-                    path2 = path2.copy()
-                    path2.reverse()
-                    common_ancestor = path2[0]
-                    path2 = path2[1:]
-                    loop.extend(path2)
+            ind1_paths = self.ind1_paths.copy()
+            self.ind1_paths.clear()
+            ind2_paths = self.ind2_paths.copy()
+            self.ind2_paths.clear()
+
+            for ind1_path in ind1_paths:
+                for ind2_path in ind2_paths:
+                    loop = ind1_path + ind2_path[::-1][1:]
                     if len(loop) - len(set(loop)) != 1:
                         continue
-                    else:
-                        self.loops.append((common_ancestor, loop))
+                    Fca = self.get_inbreeding(common_ancestor)
+                    coeff += 0.5 ** (len(loop) - 2.) * (1. + Fca)
 
-        coeff = 0.
-
-        loops = self.loops.copy()
-        self.loops.clear()
-        for loop in loops:
-            common_ancestor, sequence = loop
-            Fca = self.get_inbreeding(common_ancestor, in_process=in_process)
-            coeff += 0.5 ** (len(sequence) - 2.) * (1. + Fca)
-
-        self.inbred[individual] = coeff
         return coeff
     
     def get_kinship(self, ind1: int, ind2: int) -> float:
@@ -292,41 +256,31 @@ class Gen:
         if ind1 == ind2:
             Find = self.get_inbreeding(ind1)
             return 0.5 * (1 + Find)
-        
-        self.get_all_paths(ind1, common_ancestors, history=[])
-        self.get_all_paths(ind2, common_ancestors, history=[])
-
-        paths = self.paths.copy()
-        self.paths.clear()
-        for path1 in paths:
-            for path2 in paths:
-                if path1[0] == ind1 and path2[0] == ind2:
-                    if path2[-1] == path1[-1]:
-                        loop = path1.copy()
-                        path2 = path2.copy()
-                        path2.reverse()
-                        common_ancestor = path2[0]
-                        path2 = path2[1:]
-                        loop.extend(path2)
-                        if len(loop[1:-1]) != len(set(loop[1:-1])):
-                            continue
-                        else:
-                            self.loops.append((common_ancestor, loop))
 
         coeff = 0.
+        history = []
+        
+        for common_ancestor in common_ancestors:
+            self.get_all_paths(ind1, common_ancestors, history, 'ind1')
+            self.get_all_paths(ind2, common_ancestors, history, 'ind2')
 
-        loops = self.loops.copy()
-        self.loops.clear()
-        for loop in loops:
-            common_ancestor, sequence = loop
-            Fca = self.get_inbreeding(common_ancestor)
-            coeff += 0.5 ** (len(sequence)) * (1. + Fca)
+            ind1_paths = self.ind1_paths.copy()
+            self.ind1_paths.clear()
+            ind2_paths = self.ind2_paths.copy()
+            self.ind2_paths.clear()
+
+            for ind1_path in ind1_paths:
+                for ind2_path in ind2_paths:
+                    loop = ind1_path + ind2_path[::-1][1:]
+                    if len(loop) - len(set(loop)) != 1:
+                        continue
+                    Fca = self.get_inbreeding(common_ancestor)
+                    coeff += 0.5 ** len(loop) * (1. + Fca)
 
         return coeff
     
-    def preload_inbreedings(self, filename: str=None) -> None:
+    def preload_inbreedings(self) -> None:
         """Memoize the inbreedings for faster lookup."""
-        individuals = list(self.parents.keys())
+        individuals = list(self.par.keys())
         for individual in tqdm(individuals, desc="Preloading the inbreedings"):
-            if individual not in self.inbred:
-                self.inbred[individual] = self.get_inbreeding(individual)
+            coeff = self.get_inbreeding(individual)
