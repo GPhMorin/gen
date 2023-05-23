@@ -5,6 +5,7 @@ from os.path import exists
 import pandas as pd
 from tqdm import tqdm
 
+
 class Genealogy:
     """A class to handle genealogical data."""
 
@@ -18,12 +19,12 @@ class Genealogy:
             self._parents = self._load_parents(lines)
             self._probands = self._extract_probands()
             self._founder = self._extract_founders()
-            self._map = {individual:index for index, individual
-                        in enumerate(self._parents.keys())}
+            self._map = {individual: index for index, individual
+                         in enumerate(self._parents.keys())}
             self._first_individual_paths = []
             self._second_individual_paths = []
             self._ancestors = {}
-            
+
     def _load_parents(self, lines: list) -> dict:
         """Converts lines from the file into a dictionary of parents."""
         parents = {}
@@ -37,20 +38,24 @@ class Genealogy:
 
     def _extract_probands(self) -> list:
         """Extracts the probands as an ordered list."""
-        probands = set(self._parents.keys()) - {parent for ind in self._parents.keys()
-                                           for parent in self._parents[ind]
-                                           if parent and parent in self._parents.keys()}
+        probands = set(self._parents.keys()) - {
+            parent for ind in self._parents.keys()
+            for parent in self._parents[ind]
+            if parent and parent in self._parents.keys()
+        }
         probands = list(probands)
         probands.sort()
         return probands
-    
+
     def _extract_founders(self) -> list:
         """Extracts the founders as an ordered list."""
-        founders = [individual for individual in self._parents.keys()
-                    if self.get_parents(individual) == (None, None)]
+        founders = [
+            individual for individual in self._parents.keys()
+            if self.get_parents(individual) == (None, None)
+        ]
         founders.sort()
         return founders
-    
+
     def get_probands(self) -> list:
         """Get an ordered list of all probands."""
         return self._probands
@@ -61,56 +66,72 @@ class Genealogy:
         try:
             return self._parents[ind]
         except KeyError:
-            raise KeyError(f"The parents of individual {ind} were not found. "
-                           "You are not supposed to see this message.")
+            raise KeyError(
+                f"The parents of individual {ind} were not found. "
+                "You are not supposed to see this message."
+            )
 
     @cache
     def get_ancestors(self, ind: int) -> set:
-        """Recursively get all known ancestors of a given individual."""
-        if not ind:
-            return set()
-
-        father, mother = self.get_parents(ind)
-        ancestors = {father, mother}
-
-        if father:
-            ancestors |= self.get_ancestors(father)
-        if mother:
-            ancestors |= self.get_ancestors(mother)
-
-        return ancestors - {None}
+        """Get all known ancestors of a given individual."""
+        ancestors = set()
+        stack = [ind]
+        while stack:
+            current = stack.pop()
+            father, mother = self.get_parents(current)
+            if father and father not in ancestors:
+                stack.append(father)
+                ancestors.add(father)
+            if mother and mother not in ancestors:
+                stack.append(mother)
+                ancestors.add(mother)
+        ancestors.discard(None)
+        return ancestors
 
     def get_common_ancestors(self, individuals: list) -> set:
         """Get all most-recent common ancestors (MRCAs) from a group of individuals."""
-        ancestors_list = [self.get_ancestors(individual).union({individual})
-                          if individual not in self._ancestors 
-                          else self._ancestors[individual] 
-                          for individual in individuals]
+        ancestors_list = [
+            self.get_ancestors(individual).union({individual})
+            if individual not in self._ancestors
+            else self._ancestors[individual]
+            for individual in individuals
+        ]
         common_ancestors = set.intersection(*ancestors_list)
         common_ancestors.discard(None)
         return common_ancestors or set()
-    
+
     def search_mrcas(self, ancestor: int, common_ancestors: list) -> set:
         """Search MRCAs in the ancestors of a given ancestor."""
-        if ancestor in common_ancestors:
-            return {ancestor}
-        
-        father, mother = self.get_parents(ancestor)
-        return (self.search_mrcas(father, common_ancestors) if father else set()) | \
-               (self.search_mrcas(mother, common_ancestors) if mother else set())
+        stack = [ancestor]
+        mrcas = set()
+        while stack:
+            current = stack.pop()
+            if current in common_ancestors:
+                mrcas.add(current)
+                continue
+            father, mother = self.get_parents(current)
+            if father:
+                stack.append(father)
+            if mother:
+                stack.append(mother)
+        return mrcas
 
     def get_mrcas(self, individual1: int, individual2: int) -> set:
-        """Recursively get all most-recent common ancestors (MRCAs) from a group of individuals."""
+        """Get all most-recent common ancestors (MRCAs) from a group of individuals."""
         common_ancestors = self.get_common_ancestors([individual1, individual2])
         if not common_ancestors:
             return set()
 
-        mrca_set = set.union(*[self.search_mrcas(ancestor, common_ancestors)
-                               for ancestor in [individual1, individual2]])
-        
-        ancestors_of_mrcas = set.union(*[self.get_ancestors(ancestor) for ancestor in list(mrca_set)])
+        mrcas = set.union(*[
+            self.search_mrcas(ancestor, common_ancestors)
+            for ancestor in [individual1, individual2]
+        ])
 
-        return mrca_set - ancestors_of_mrcas
+        ancestors_of_mrcas = set.union(*[
+            self.get_ancestors(ancestor) for ancestor in mrcas
+        ])
+
+        return mrcas - ancestors_of_mrcas
 
     def shortest_path(self, df: pd.DataFrame, proband: int,
                       ancestor: int, mrca: int, depth: int) -> None:
