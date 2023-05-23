@@ -1,10 +1,11 @@
-import pandas as pd
-from tqdm import tqdm
 import re
 from functools import cache
 from os.path import exists
 
-class Gen:
+import pandas as pd
+from tqdm import tqdm
+
+class Genealogy:
     """A class to handle genealogical data."""
 
     def __init__(self, filename: str) -> None:
@@ -19,8 +20,8 @@ class Gen:
             self._founder = self._extract_founders()
             self._map = {individual:index for index, individual
                         in enumerate(self._parents.keys())}
-            self._ind1_paths = []
-            self._ind2_paths = []
+            self._first_individual_paths = []
+            self._second_individual_paths = []
             self._ancestors = {}
             
     def _load_parents(self, lines: list) -> dict:
@@ -60,7 +61,8 @@ class Gen:
         try:
             return self._parents[ind]
         except KeyError:
-            return (None, None)
+            raise KeyError(f"The parents of individual {ind} were not found. "
+                           "You are not supposed to see this message.")
 
     @cache
     def get_ancestors(self, ind: int) -> set:
@@ -86,7 +88,7 @@ class Gen:
                           for individual in individuals]
         common_ancestors = set.intersection(*ancestors_list)
         common_ancestors.discard(None)
-        return common_ancestors or None
+        return common_ancestors or set()
     
     def search_mrcas(self, ancestor: int, common_ancestors: list) -> set:
         """Search MRCAs in the ancestors of a given ancestor."""
@@ -205,9 +207,9 @@ class Gen:
         
         if current == target_ancestor:
             if pathway == 'ind1':
-                self._ind1_paths.append(new_history)
+                self._first_individual_paths.append(new_history)
             elif pathway == 'ind2':
-                self._ind2_paths.append(new_history)
+                self._second_individual_paths.append(new_history)
             return
 
         father, mother = self.get_parents(current)
@@ -241,14 +243,14 @@ class Gen:
             self.get_all_paths(father, common_ancestor, fathers_ancestors-ancestors_ancestors, history, 'ind1')
             self.get_all_paths(mother, common_ancestor, mothers_ancestors-ancestors_ancestors, history, 'ind2')
 
-            ind1_paths = self._ind1_paths.copy()
-            self._ind1_paths.clear()
-            ind2_paths = self._ind2_paths.copy()
-            self._ind2_paths.clear()
+            individual1_paths = self._first_individual_paths.copy()
+            self._first_individual_paths.clear()
+            individual2_paths = self._second_individual_paths.copy()
+            self._second_individual_paths.clear()
 
-            for ind1_path in ind1_paths:
-                for ind2_path in ind2_paths:
-                    loop = ind1_path + ind2_path[::-1][1:]
+            for individual1_path in individual1_paths:
+                for individual2_path in individual2_paths:
+                    loop = individual1_path + individual2_path[::-1][1:]
                     if len(loop) - len(set(loop)) != 1:
                         continue
                     Fca = self.get_inbreeding(common_ancestor)
@@ -256,35 +258,35 @@ class Gen:
 
         return coeff
     
-    def get_kinship(self, ind1: int, ind2: int) -> float:
+    def get_kinship(self, individual1: int, individual2: int) -> float:
         """Compute the coefficient of kinship between two individuals."""
-        common_ancestors = self.get_common_ancestors([ind1, ind2])
+        common_ancestors = self.get_common_ancestors([individual1, individual2])
         if not common_ancestors:
             return 0.
         
-        if ind1 == ind2:
-            Find = self.get_inbreeding(ind1)
+        if individual1 == individual2:
+            Find = self.get_inbreeding(individual1)
             return 0.5 * (1 + Find)
 
         coeff = 0.
         history = []
         
         for common_ancestor in list(common_ancestors):
-            ind1_ancestors = self.get_ancestors(ind1)
-            ind2_ancestors = self.get_ancestors(ind2)
+            individual1_ancestors = self.get_ancestors(individual1)
+            individual2_ancestors = self.get_ancestors(individual2)
             ancestors_ancestors = self.get_ancestors(common_ancestor)
 
-            self.get_all_paths(ind1, common_ancestor, ind1_ancestors-ancestors_ancestors, history, 'ind1')
-            self.get_all_paths(ind2, common_ancestor, ind2_ancestors-ancestors_ancestors, history, 'ind2')
+            self.get_all_paths(individual1, common_ancestor, individual1_ancestors-ancestors_ancestors, history, 'ind1')
+            self.get_all_paths(individual2, common_ancestor, individual2_ancestors-ancestors_ancestors, history, 'ind2')
 
-            ind1_paths = self._ind1_paths.copy()
-            self._ind1_paths.clear()
-            ind2_paths = self._ind2_paths.copy()
-            self._ind2_paths.clear()
+            individual1_paths = self._first_individual_paths.copy()
+            self._first_individual_paths.clear()
+            individual2_paths = self._second_individual_paths.copy()
+            self._second_individual_paths.clear()
 
-            for ind1_path in ind1_paths:
-                for ind2_path in ind2_paths:
-                    loop = ind1_path + ind2_path[::-1][1:]
+            for individual1_path in individual1_paths:
+                for individual2_path in individual2_paths:
+                    loop = individual1_path + individual2_path[::-1][1:]
                     if len(loop) - len(set(loop)) != 0:
                         continue
                     Fca = self.get_inbreeding(common_ancestor)
