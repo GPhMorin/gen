@@ -99,14 +99,14 @@ class Genealogy:
         return (self.search_mrcas(father, common_ancestors) if father else set()) | \
                (self.search_mrcas(mother, common_ancestors) if mother else set())
 
-    def get_mrcas(self, ind1: int, ind2: int) -> set:
+    def get_mrcas(self, individual1: int, individual2: int) -> set:
         """Recursively get all most-recent common ancestors (MRCAs) from a group of individuals."""
-        common_ancestors = self.get_common_ancestors([ind1, ind2])
+        common_ancestors = self.get_common_ancestors([individual1, individual2])
         if not common_ancestors:
             return set()
 
         mrca_set = set.union(*[self.search_mrcas(ancestor, common_ancestors)
-                               for ancestor in [ind1, ind2]])
+                               for ancestor in [individual1, individual2]])
         
         ancestors_of_mrcas = set.union(*[self.get_ancestors(ancestor) for ancestor in list(mrca_set)])
 
@@ -128,10 +128,10 @@ class Genealogy:
     def get_shortest_distances(self, probands: list) -> pd.DataFrame:
         """Get the shortest distances (generations) from each proband to their most-recent common ancestors (MRCAs)."""
         all_mrcas = set()
-        for ind1 in probands:
-            for ind2 in probands:
-                if ind1 < ind2:
-                    mrca_set = self.get_mrcas(ind1, ind2)
+        for individual1 in probands:
+            for individual2 in probands:
+                if individual1 < individual2:
+                    mrca_set = self.get_mrcas(individual1, individual2)
                     if mrca_set:
                         all_mrcas.update(mrca_set)
         
@@ -206,9 +206,9 @@ class Genealogy:
         new_history.append(current)
         
         if current == target_ancestor:
-            if pathway == 'ind1':
+            if pathway == 'individual1':
                 self._first_individual_paths.append(new_history)
-            elif pathway == 'ind2':
+            elif pathway == 'individual2':
                 self._second_individual_paths.append(new_history)
             return
 
@@ -240,8 +240,8 @@ class Genealogy:
             mothers_ancestors = self.get_ancestors(mother)
             ancestors_ancestors = self.get_ancestors(common_ancestor)
 
-            self.get_all_paths(father, common_ancestor, fathers_ancestors-ancestors_ancestors, history, 'ind1')
-            self.get_all_paths(mother, common_ancestor, mothers_ancestors-ancestors_ancestors, history, 'ind2')
+            self.get_all_paths(father, common_ancestor, fathers_ancestors-ancestors_ancestors, history, 'individual1')
+            self.get_all_paths(mother, common_ancestor, mothers_ancestors-ancestors_ancestors, history, 'individual2')
 
             individual1_paths = self._first_individual_paths.copy()
             self._first_individual_paths.clear()
@@ -276,8 +276,8 @@ class Genealogy:
             individual2_ancestors = self.get_ancestors(individual2)
             ancestors_ancestors = self.get_ancestors(common_ancestor)
 
-            self.get_all_paths(individual1, common_ancestor, individual1_ancestors-ancestors_ancestors, history, 'ind1')
-            self.get_all_paths(individual2, common_ancestor, individual2_ancestors-ancestors_ancestors, history, 'ind2')
+            self.get_all_paths(individual1, common_ancestor, individual1_ancestors-ancestors_ancestors, history, 'individual1')
+            self.get_all_paths(individual2, common_ancestor, individual2_ancestors-ancestors_ancestors, history, 'individual2')
 
             individual1_paths = self._first_individual_paths.copy()
             self._first_individual_paths.clear()
