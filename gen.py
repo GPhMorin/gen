@@ -11,13 +11,14 @@ class Gen:
         self.filename = filename
         with open(filename, 'r') as infile:
             lines = infile.readlines()[1:]
-            self.par = self._load_parents(lines)
-            self.pro = self._extract_probands()
-            self.fon = self._extract_founders()
-            self.map = {individual:index for index, individual
-                        in enumerate(self.par.keys())}
-            self.ind1_paths = []
-            self.ind2_paths = []
+            self._parents = self._load_parents(lines)
+            self._probands = self._extract_probands()
+            self._founder = self._extract_founders()
+            self._map = {individual:index for index, individual
+                        in enumerate(self._parents.keys())}
+            self._ind1_paths = []
+            self._ind2_paths = []
+            self._ancestors = {}
             
     def _load_parents(self, lines: list) -> dict:
         """Converts lines from the file into a dictionary of parents."""
@@ -32,28 +33,29 @@ class Gen:
 
     def _extract_probands(self) -> list:
         """Extracts the probands as an ordered list."""
-        probands = set(self.par.keys()) - {parent for ind in self.par.keys()
-                                           for parent in self.par[ind]
-                                           if parent and parent in self.par.keys()}
+        probands = set(self._parents.keys()) - {parent for ind in self._parents.keys()
+                                           for parent in self._parents[ind]
+                                           if parent and parent in self._parents.keys()}
         probands = list(probands)
         probands.sort()
         return probands
     
     def _extract_founders(self) -> list:
         """Extracts the founders as an ordered list."""
-        founders = [individual for individual in self.par.keys()
+        founders = [individual for individual in self._parents.keys()
                     if self.get_parents(individual) == (None, None)]
         founders.sort()
         return founders
     
     def get_probands(self) -> list:
         """Get an ordered list of all probands."""
-        return self.pro
+        return self._probands
 
+    @cache
     def get_parents(self, ind: int) -> tuple:
         """Get the parents (father, mother) of a given individual."""
         try:
-            return self.par[ind]
+            return self._parents[ind]
         except KeyError:
             return (None, None)
 
@@ -65,18 +67,19 @@ class Gen:
 
         father, mother = self.get_parents(ind)
         ancestors = {father, mother}
-        fathers_ancestry = self.get_ancestors(father)
-        if fathers_ancestry:
-            ancestors |= fathers_ancestry
-        mothers_ancestry = self.get_ancestors(mother)
-        if mothers_ancestry:
-            ancestors |= mothers_ancestry
 
-        return ancestors
+        if father:
+            ancestors |= self.get_ancestors(father)
+        if mother:
+            ancestors |= self.get_ancestors(mother)
+
+        return ancestors - {None}
 
     def get_common_ancestors(self, individuals: list) -> set:
         """Get all most-recent common ancestors (MRCAs) from a group of individuals."""
         ancestors_list = [self.get_ancestors(individual).union({individual})
+                          if individual not in self._ancestors 
+                          else self._ancestors[individual] 
                           for individual in individuals]
         common_ancestors = set.intersection(*ancestors_list)
         common_ancestors.discard(None)
@@ -192,25 +195,25 @@ class Gen:
                 visited_parents.add((father, mother))
         return probands
     
-    def get_all_paths(self, current: int, target_ancestor: int, history: list, pathway: str) -> None:
+    def get_all_paths(self, current: int, target_ancestor: int, intermediate_ancestors: set, history: list, pathway: str) -> None:
         '''Find all possible paths from an individual to a set of common ancestors.'''
         new_history = history.copy()
         new_history.append(current)
         
         if current == target_ancestor:
             if pathway == 'ind1':
-                self.ind1_paths.append(new_history)
+                self._ind1_paths.append(new_history)
             elif pathway == 'ind2':
-                self.ind2_paths.append(new_history)
+                self._ind2_paths.append(new_history)
             return
 
         father, mother = self.get_parents(current)
 
         # Avoid cycles by not revisiting already visited nodes.
-        if father and father not in history:
-            self.get_all_paths(father, target_ancestor, new_history, pathway)
-        if mother and mother not in history:
-            self.get_all_paths(mother, target_ancestor, new_history, pathway)
+        if father and father in intermediate_ancestors and father not in history:
+            self.get_all_paths(father, target_ancestor, intermediate_ancestors, new_history, pathway)
+        if mother and mother in intermediate_ancestors and mother not in history:
+            self.get_all_paths(mother, target_ancestor, intermediate_ancestors, new_history, pathway)
     
     @cache
     def get_inbreeding(self, individual: int) -> float:
@@ -228,13 +231,17 @@ class Gen:
         coeff = 0.
         
         for common_ancestor in list(common_ancestors):
-            self.get_all_paths(father, common_ancestor, history, 'ind1')
-            self.get_all_paths(mother, common_ancestor, history, 'ind2')
+            fathers_ancestors = self.get_ancestors(father)
+            mothers_ancestors = self.get_ancestors(mother)
+            ancestors_ancestors = self.get_ancestors(common_ancestor)
 
-            ind1_paths = self.ind1_paths.copy()
-            self.ind1_paths.clear()
-            ind2_paths = self.ind2_paths.copy()
-            self.ind2_paths.clear()
+            self.get_all_paths(father, common_ancestor, fathers_ancestors-ancestors_ancestors, history, 'ind1')
+            self.get_all_paths(mother, common_ancestor, mothers_ancestors-ancestors_ancestors, history, 'ind2')
+
+            ind1_paths = self._ind1_paths.copy()
+            self._ind1_paths.clear()
+            ind2_paths = self._ind2_paths.copy()
+            self._ind2_paths.clear()
 
             for ind1_path in ind1_paths:
                 for ind2_path in ind2_paths:
@@ -260,13 +267,17 @@ class Gen:
         history = []
         
         for common_ancestor in list(common_ancestors):
-            self.get_all_paths(ind1, common_ancestor, history, 'ind1')
-            self.get_all_paths(ind2, common_ancestor, history, 'ind2')
+            ind1_ancestors = self.get_ancestors(ind1)
+            ind2_ancestors = self.get_ancestors(ind2)
+            ancestors_ancestors = self.get_ancestors(common_ancestor)
 
-            ind1_paths = self.ind1_paths.copy()
-            self.ind1_paths.clear()
-            ind2_paths = self.ind2_paths.copy()
-            self.ind2_paths.clear()
+            self.get_all_paths(ind1, common_ancestor, ind1_ancestors-ancestors_ancestors, history, 'ind1')
+            self.get_all_paths(ind2, common_ancestor, ind2_ancestors-ancestors_ancestors, history, 'ind2')
+
+            ind1_paths = self._ind1_paths.copy()
+            self._ind1_paths.clear()
+            ind2_paths = self._ind2_paths.copy()
+            self._ind2_paths.clear()
 
             for ind1_path in ind1_paths:
                 for ind2_path in ind2_paths:
@@ -277,9 +288,3 @@ class Gen:
                     coeff += 0.5 ** len(loop) * (1. + Fca)
 
         return coeff
-    
-    def preload_inbreedings(self) -> None:
-        """Memoize the inbreedings for faster lookup."""
-        individuals = list(self.par.keys())
-        for individual in tqdm(individuals, desc="Preloading the inbreedings"):
-            coeff = self.get_inbreeding(individual)
