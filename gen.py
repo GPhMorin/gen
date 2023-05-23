@@ -2,6 +2,7 @@ import pandas as pd
 from tqdm import tqdm
 import re
 from functools import cache
+from os.path import exists
 
 class Gen:
     """A class to handle genealogical data."""
@@ -9,6 +10,8 @@ class Gen:
     def __init__(self, filename: str) -> None:
         """Initializes the Gen object with a file containing genealogical data."""
         self._filename = filename
+        if not exists(filename):
+            raise FileNotFoundError("The pedigree file was not found.")
         with open(filename, 'r') as infile:
             lines = infile.readlines()[1:]
             self._parents = self._load_parents(lines)
