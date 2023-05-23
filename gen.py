@@ -1,6 +1,8 @@
 import re
 from functools import cache
 from os.path import exists
+from itertools import combinations_with_replacement
+from collections import deque
 
 import pandas as pd
 from tqdm import tqdm
@@ -30,10 +32,10 @@ class Genealogy:
         parents = {}
         for line in lines:
             # Splitting the line with multiple possible separators
-            ind, father, mother, _ = re.split(r'[,\t ]+', line.strip())
+            child, father, mother, _ = re.split(r'[,\t ]+', line.strip())
             father = int(father) if father != '0' else None
             mother = int(mother) if mother != '0' else None
-            parents[int(ind)] = (father, mother)
+            parents[int(child)] = (father, mother)
         return parents
 
     def _extract_probands(self) -> list:
@@ -61,21 +63,21 @@ class Genealogy:
         return self._probands
 
     @cache
-    def get_parents(self, ind: int) -> tuple:
+    def get_parents(self, child: int) -> tuple:
         """Get the parents (father, mother) of a given individual."""
         try:
-            return self._parents[ind]
+            return self._parents[child]
         except KeyError:
             raise KeyError(
-                f"The parents of individual {ind} were not found. "
+                f"The parents of child {child} were not found. "
                 "You are not supposed to see this message."
             )
 
     @cache
-    def get_ancestors(self, ind: int) -> set:
+    def get_ancestors(self, descendant: int) -> set:
         """Get all known ancestors of a given individual."""
         ancestors = set()
-        stack = [ind]
+        stack = [descendant]
         while stack:
             current = stack.pop()
             father, mother = self.get_parents(current)
@@ -178,7 +180,7 @@ class Genealogy:
     def prepare_kinships(self, interests: list) -> None:
         """Prepare the files for IdCoefs (M Abney, 2009)."""
         # Load the file into a pandas DataFrame
-        df = pd.read_csv(self._filename, sep=' ')
+        df = pd.read_csv(self._filename, sep='\t')
         df.set_index('ind', inplace=True)
 
         # Create a dictionary to store the reordered data
@@ -194,7 +196,7 @@ class Genealogy:
             if df.at[node, 'mother'] != 0:
                 dfs(df.at[node, 'mother'])
             # Add the node to the reordered data
-            reordered_data[node] = [node] + df.at[node].tolist()
+            reordered_data[node] = [node] + df.loc[node].tolist()
 
         # Start the DFS at each node
         for node in tqdm(df.index, desc="Reordering the pedigree"):
@@ -207,8 +209,9 @@ class Genealogy:
         reordered_df.to_csv('gen.pedigree', sep='\t', header=False, index=False)
 
         with open('gen.study', 'w') as outfile:
-            for interest in tqdm(interests, desc="Writing the individuals of interest"):
-                outfile.write(f"{interest}\n")
+            combos = list(combinations_with_replacement(interests, 2))[:100]
+            for individual1, individual2 in tqdm(combos, desc="Writing the individuals of interest"):
+                outfile.write(f"{individual1} + {individual2}\n")
 
     def get_one_per_family(self) -> list:
         """Extract only one proband per family."""
@@ -242,6 +245,25 @@ class Genealogy:
             self.get_all_paths(mother, target_ancestor, intermediate_ancestors, new_history, pathway)
     
     @cache
+    def bfs_paths(self, start, goal):
+        """Find all paths from start to goal using breadth-first search."""
+        queue = deque([(start, [start])])
+        paths = []
+
+        while queue:
+            node, path = queue.popleft()
+
+            if node == goal:
+                paths.append(path)
+            else:
+                neighbors = self.get_parents(node)
+                for neighbor in neighbors:
+                    if neighbor and neighbor not in path:
+                        queue.append((neighbor, path + [neighbor]))
+
+        return paths
+
+    @cache
     def get_inbreeding(self, individual: int) -> float:
         """Compute the coefficient of inbreeding of a given individual."""
         father, mother = self.get_parents(individual)
@@ -249,33 +271,24 @@ class Genealogy:
             return 0.
 
         common_ancestors = self.get_common_ancestors([father, mother])
-        history = [individual]
-
         if not common_ancestors:
             return 0.
         
         coefficient = 0.
-        
+            
         for common_ancestor in list(common_ancestors):
-            fathers_ancestors = self.get_ancestors(father)
-            mothers_ancestors = self.get_ancestors(mother)
-            ancestors_ancestors = self.get_ancestors(common_ancestor)
-
-            self.get_all_paths(father, common_ancestor, fathers_ancestors-ancestors_ancestors, history, 'individual1')
-            self.get_all_paths(mother, common_ancestor, mothers_ancestors-ancestors_ancestors, history, 'individual2')
-
-            individual1_paths = self._first_individual_paths.copy()
-            self._first_individual_paths.clear()
-            individual2_paths = self._second_individual_paths.copy()
-            self._second_individual_paths.clear()
+            individual1_paths = self.bfs_paths(father, common_ancestor)
+            individual2_paths = self.bfs_paths(mother, common_ancestor)
 
             for individual1_path in individual1_paths:
                 for individual2_path in individual2_paths:
                     loop = individual1_path + individual2_path[::-1][1:]
-                    if len(loop) - len(set(loop)) != 1:
+                    # Reject loops that are not simple (recurring nodes)
+                    if len(loop) - len(set(loop)) != 0:
                         continue
+                    # Compute the inbreeding coefficients
                     Fca = self.get_inbreeding(common_ancestor)
-                    coefficient += 0.5 ** (len(loop) - 2.) * (1. + Fca)
+                    coefficient += 0.5 ** len(loop) * (1. + Fca)
 
         return coefficient
     
@@ -290,26 +303,18 @@ class Genealogy:
             return 0.5 * (1 + Find)
 
         coefficient = 0.
-        history = []
         
         for common_ancestor in list(common_ancestors):
-            individual1_ancestors = self.get_ancestors(individual1)
-            individual2_ancestors = self.get_ancestors(individual2)
-            ancestors_ancestors = self.get_ancestors(common_ancestor)
-
-            self.get_all_paths(individual1, common_ancestor, individual1_ancestors-ancestors_ancestors, history, 'individual1')
-            self.get_all_paths(individual2, common_ancestor, individual2_ancestors-ancestors_ancestors, history, 'individual2')
-
-            individual1_paths = self._first_individual_paths.copy()
-            self._first_individual_paths.clear()
-            individual2_paths = self._second_individual_paths.copy()
-            self._second_individual_paths.clear()
+            individual1_paths = self.bfs_paths(individual1, common_ancestor)
+            individual2_paths = self.bfs_paths(individual2, common_ancestor)
 
             for individual1_path in individual1_paths:
                 for individual2_path in individual2_paths:
                     loop = individual1_path + individual2_path[::-1][1:]
+                    # Reject loops that are not simple (recurring nodes)
                     if len(loop) - len(set(loop)) != 0:
                         continue
+                    # Compute the kinship coefficient
                     Fca = self.get_inbreeding(common_ancestor)
                     coefficient += 0.5 ** len(loop) * (1. + Fca)
 
