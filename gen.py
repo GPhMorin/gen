@@ -233,7 +233,7 @@ class Genealogy:
         if not common_ancestors:
             return 0.
         
-        coeff = 0.
+        coefficient = 0.
         
         for common_ancestor in list(common_ancestors):
             fathers_ancestors = self.get_ancestors(father)
@@ -254,9 +254,9 @@ class Genealogy:
                     if len(loop) - len(set(loop)) != 1:
                         continue
                     Fca = self.get_inbreeding(common_ancestor)
-                    coeff += 0.5 ** (len(loop) - 2.) * (1. + Fca)
+                    coefficient += 0.5 ** (len(loop) - 2.) * (1. + Fca)
 
-        return coeff
+        return coefficient
     
     def get_kinship(self, individual1: int, individual2: int) -> float:
         """Compute the coefficient of kinship between two individuals."""
@@ -268,7 +268,7 @@ class Genealogy:
             Find = self.get_inbreeding(individual1)
             return 0.5 * (1 + Find)
 
-        coeff = 0.
+        coefficient = 0.
         history = []
         
         for common_ancestor in list(common_ancestors):
@@ -290,6 +290,6 @@ class Genealogy:
                     if len(loop) - len(set(loop)) != 0:
                         continue
                     Fca = self.get_inbreeding(common_ancestor)
-                    coeff += 0.5 ** len(loop) * (1. + Fca)
+                    coefficient += 0.5 ** len(loop) * (1. + Fca)
 
-        return coeff
+        return coefficient
