@@ -8,7 +8,7 @@ class Gen:
 
     def __init__(self, filename: str) -> None:
         """Initializes the Gen object with a file containing genealogical data."""
-        self.filename = filename
+        self._filename = filename
         with open(filename, 'r') as infile:
             lines = infile.readlines()[1:]
             self._parents = self._load_parents(lines)
@@ -152,7 +152,7 @@ class Gen:
     def prepare_kinships(self, interests: list) -> None:
         """Prepare the files for IdCoefs (M Abney, 2009)."""
         # Load the file into a pandas DataFrame
-        df = pd.read_csv(self.filename, sep=' ')
+        df = pd.read_csv(self._filename, sep=' ')
         df.set_index('ind', inplace=True)
 
         # Create a dictionary to store the reordered data
