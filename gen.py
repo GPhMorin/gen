@@ -245,7 +245,7 @@ class Genealogy:
             self.get_all_paths(mother, target_ancestor, intermediate_ancestors, new_history, pathway)
     
     @cache
-    def bfs_paths(self, start, goal):
+    def bfs_paths(self, start: int, goal: int) -> list:
         """Find all paths from start to goal using breadth-first search."""
         queue = deque([(start, [start])])
         paths = []
