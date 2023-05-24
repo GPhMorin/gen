@@ -1,8 +1,9 @@
 import re
 from functools import cache
 from os.path import exists
-from itertools import combinations_with_replacement
+from itertools import combinations_with_replacement, product
 from collections import deque
+from time import time
 
 import pandas as pd
 from tqdm import tqdm
@@ -102,6 +103,7 @@ class Genealogy:
         common_ancestors.discard(None)
         return common_ancestors or set()
 
+    @cache
     def search_mrcas(self, ancestor: int, common_ancestors: list) -> set:
         """Search MRCAs in the ancestors of a given ancestor."""
         stack = [ancestor]
@@ -118,6 +120,7 @@ class Genealogy:
                 stack.append(mother)
         return mrcas
 
+    @cache
     def get_mrcas(self, individual1: int, individual2: int) -> set:
         """Get all most-recent common ancestors (MRCAs) from a group of individuals."""
         common_ancestors = self.get_common_ancestors([individual1, individual2])
@@ -256,7 +259,7 @@ class Genealogy:
             if node == goal:
                 paths.append(path)
             else:
-                neighbors = self.get_parents(node)
+                neighbors = self._parents[node]
                 for neighbor in neighbors:
                     if neighbor and neighbor not in path:
                         queue.append((neighbor, path + [neighbor]))
@@ -277,18 +280,13 @@ class Genealogy:
         coefficient = 0.
             
         for common_ancestor in list(common_ancestors):
-            individual1_paths = self.bfs_paths(father, common_ancestor)
-            individual2_paths = self.bfs_paths(mother, common_ancestor)
-
-            for individual1_path in individual1_paths:
-                for individual2_path in individual2_paths:
-                    loop = individual1_path + individual2_path[::-1][1:]
-                    # Reject loops that are not simple (recurring nodes)
-                    if len(loop) - len(set(loop)) != 0:
-                        continue
-                    # Compute the inbreeding coefficients
-                    Fca = self.get_inbreeding(common_ancestor)
-                    coefficient += 0.5 ** len(loop) * (1. + Fca)
+            Fca = self.get_inbreeding(common_ancestor)
+            paths1 = self.bfs_paths(father, common_ancestor)
+            paths2 = self.bfs_paths(mother, common_ancestor)
+            possible_loops = [path1 + path2 for path1 in paths1 for path2 in paths2]
+            loops = [loop for loop in possible_loops if len(loop) - len(set(loop)) == 1]
+            for loop in loops:
+                coefficient += 0.5 ** len(set(loop)) * (1. + Fca)
 
         return coefficient
     
@@ -305,17 +303,45 @@ class Genealogy:
         coefficient = 0.
         
         for common_ancestor in list(common_ancestors):
-            individual1_paths = self.bfs_paths(individual1, common_ancestor)
-            individual2_paths = self.bfs_paths(individual2, common_ancestor)
-
-            for individual1_path in individual1_paths:
-                for individual2_path in individual2_paths:
-                    loop = individual1_path + individual2_path[::-1][1:]
-                    # Reject loops that are not simple (recurring nodes)
-                    if len(loop) - len(set(loop)) != 0:
-                        continue
-                    # Compute the kinship coefficient
-                    Fca = self.get_inbreeding(common_ancestor)
-                    coefficient += 0.5 ** len(loop) * (1. + Fca)
+            Fca = self.get_inbreeding(common_ancestor)
+            paths1 = self.bfs_paths(individual1, common_ancestor)
+            paths2 = self.bfs_paths(individual2, common_ancestor)
+            possible_loops = [path1 + path2 for path1 in paths1 for path2 in paths2]
+            loops = [loop for loop in possible_loops if len(loop) - len(set(loop)) == 1]
+            for loop in loops:
+                coefficient += 0.5 ** len(set(loop)) * (1. + Fca)
 
         return coefficient
+
+    def recursive_kinship(self, individual1: int, individual2: int, max1: int, max2: int) -> float:
+        """A recursive version of kinship coefficients from R's GENLIB library (Gauvin et al.,2015)."""
+        if individual1 == individual2:
+            father, mother = self._parents[individual1]
+            if father and mother:
+                maximum = max(max1, max2)
+                if maximum > 0:
+                    value = self.recursive_kinship(father, mother, maximum-1, maximum-1)
+                else:
+                    value = 0.
+            else:
+                value = 0.
+
+            return (1 + value) * 0.5
+        
+        if self._map[individual2] > self._map[individual1]:
+            individual1, individual2 = individual2, individual1
+            max1, max2 = max2, max1
+
+        father, mother = self._parents[individual1]
+        if not father and not mother:
+            return 0.
+        
+        mother_value = 0.
+        father_value = 0.
+        if max1 > 0:
+            if mother:
+                mother_value = self.recursive_kinship(mother, individual2, max1-1, max2)
+            if father:
+                father_value = self.recursive_kinship(father, individual2, max1-1, max2)
+
+        return (father_value + mother_value) / 2.
