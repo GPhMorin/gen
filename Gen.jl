@@ -138,11 +138,6 @@ function inbreeding(g::Genealogy, individual::Int32)
     F
 end
 
-function kinship(g::Genealogy, individual1::Int32, individual2::Int32)
-    g.parents[999999999] = (individual1, individual2)
-    return inbreeding(g, 999999999)
-end
-
 function iterative_kinship(g::Genealogy, individual1::Int32, individual2::Int32)
     ϕ = 0.0
 
