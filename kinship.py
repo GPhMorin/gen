@@ -1,5 +1,6 @@
 from functools import cache
 from sys import argv
+from tqdm import tqdm
 
 def get_dict(filename: str) -> dict:
     """Converts lines from the file into a dictionary of parents and indices."""
@@ -59,9 +60,12 @@ def get_kinship(individual1: int, individual2: int) -> float:
 dict = get_dict('../data/tous_individus_pro1931-60_SAG.asc')
 unique_family_members = get_unique_family_members(dict)
 
-pro1 = unique_family_members[int(argv[1])]
-with open(f'../results/kinships/kinships_{pro1}', 'w') as outfile:
-    for pro2 in unique_family_members:
-        if pro1 <= pro2:
-            kinship = get_kinship(pro1, pro2)
-            outfile.write(f'{pro1} {pro2} {kinship}\n')
+range = int(argv[1])*1000
+
+for pro1 in tqdm(unique_family_members[range:range+1000]):
+    with open(f'../results/kinships/kinships_{pro1}', 'w') as outfile:
+        for pro2 in unique_family_members:
+            if pro1 <= pro2:
+                kinship = get_kinship(pro1, pro2)
+                outfile.write(f'{pro1} {pro2} {kinship}\n')
+    get_kinship.cache_clear()
