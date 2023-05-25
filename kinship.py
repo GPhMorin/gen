@@ -1,7 +1,5 @@
 from functools import cache
-from concurrent.futures import ProcessPoolExecutor, as_completed
-
-from tqdm import tqdm
+from sys import argv
 
 def get_dict(filename: str) -> dict:
     """Converts lines from the file into a dictionary of parents and indices."""
@@ -33,7 +31,7 @@ def get_unique_family_members(dict: dict) -> list:
 
 @cache
 def get_kinship(individual1: int, individual2: int) -> float:
-    """A recursive version of kinship coefficients from R's GENLIB library (Gauvin et al.,2015)."""
+    """A recursive version of kinship coefficients from R's GENLIB library (Gauvin et al., 2015)."""
     if individual1 == individual2:
         father, mother, _ = dict[individual1]
         if father and mother:
@@ -61,9 +59,9 @@ def get_kinship(individual1: int, individual2: int) -> float:
 dict = get_dict('../data/tous_individus_pro1931-60_SAG.asc')
 unique_family_members = get_unique_family_members(dict)
 
-for pro1 in tqdm(unique_family_members[:10], desc="Pro1"):
-    for pro2 in tqdm(unique_family_members, desc="Pro2"):
+pro1 = unique_family_members[int(argv[1])]
+with open(f'../results/kinships/kinships_{pro1}', 'w') as outfile:
+    for pro2 in unique_family_members:
         if pro1 <= pro2:
-             kinship = get_kinship(pro1, pro2)
-             with open('kinship.txt', 'a') as outfile:
-                  outfile.write(f'{pro1} {pro2} {kinship}\n')
+            kinship = get_kinship(pro1, pro2)
+            outfile.write(f'{pro1} {pro2} {kinship}\n')
