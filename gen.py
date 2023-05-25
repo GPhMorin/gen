@@ -312,36 +312,40 @@ class Genealogy:
                 coefficient += 0.5 ** len(set(loop)) * (1. + Fca)
 
         return coefficient
+    
+def load_dict(filename: str) -> dict:
+    """Converts lines from the file into a dictionary of parents and indices."""
+    with open(filename, 'r') as infile:
+        lines = infile.readlines()[1:]
+    dict = {}
+    for index, line in enumerate(lines):
+        # Splitting the line with multiple possible separators
+        child, father, mother, _ = re.split(r'[,\t ]+', line.strip())
+        dict[int(child)] = (int(father), int(mother), index)
+    return dict
 
-    def recursive_kinship(self, individual1: int, individual2: int, max1: int, max2: int) -> float:
-        """A recursive version of kinship coefficients from R's GENLIB library (Gauvin et al.,2015)."""
-        if individual1 == individual2:
-            father, mother = self._parents[individual1]
-            if father and mother:
-                maximum = max(max1, max2)
-                if maximum > 0:
-                    value = self.recursive_kinship(father, mother, maximum-1, maximum-1)
-                else:
-                    value = 0.
-            else:
-                value = 0.
+def kinship(dict: dict, individual1: int, individual2: int) -> float:
+    """A recursive version of kinship coefficients from R's GENLIB library (Gauvin et al.,2015)."""
+    if individual1 == individual2:
+        father, mother, _ = dict[individual1]
+        if father and mother:
+                value = kinship(dict, father, mother)
+        else:
+            value = 0.
+        return (1 + value) * 0.5
+    
+    if dict[individual2][2] > dict[individual1][2]:
+        individual1, individual2 = individual2, individual1
 
-            return (1 + value) * 0.5
-        
-        if self._map[individual2] > self._map[individual1]:
-            individual1, individual2 = individual2, individual1
-            max1, max2 = max2, max1
+    father, mother, _ = dict[individual1]
+    if not father and not mother:
+        return 0.
+    
+    mother_value = 0.
+    father_value = 0.
+    if mother:
+        mother_value = kinship(dict, mother, individual2)
+    if father:
+        father_value = kinship(dict, father, individual2)
 
-        father, mother = self._parents[individual1]
-        if not father and not mother:
-            return 0.
-        
-        mother_value = 0.
-        father_value = 0.
-        if max1 > 0:
-            if mother:
-                mother_value = self.recursive_kinship(mother, individual2, max1-1, max2)
-            if father:
-                father_value = self.recursive_kinship(father, individual2, max1-1, max2)
-
-        return (father_value + mother_value) / 2.
+    return (father_value + mother_value) / 2.
