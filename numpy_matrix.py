@@ -1,7 +1,6 @@
 from os import listdir
 
 import numpy as np
-from scipy.sparse import dok_matrix, save_npz
 from tqdm import tqdm
 
 def get_dict(filename: str) -> dict:
@@ -36,7 +35,7 @@ unique_family_members = get_unique_family_members(dict)
 
 map = {individual:index for index, individual in enumerate(unique_family_members)}
 
-matrix = dok_matrix((len(unique_family_members), len(unique_family_members)), dtype=np.float32)
+matrix = np.zeros((len(unique_family_members), len(unique_family_members)), dtype=float)
 
 for filename in tqdm(listdir('../results/kinships/'), "Compiling the DataFrame"):
     with open(f"../results/kinships/{filename}", 'r') as infile:
@@ -45,5 +44,4 @@ for filename in tqdm(listdir('../results/kinships/'), "Compiling the DataFrame")
             matrix[map[int(proband1)], map[int(proband2)]] = float(kinship)
             matrix[map[int(proband2)], map[int(proband1)]] = float(kinship)
 
-matrix = matrix.tocoo()
-save_npz('../results/kinships.npz', matrix)
+np.savez('../results/numpy_kinships.npz', matrix)
