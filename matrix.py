@@ -1,7 +1,7 @@
 from os import listdir
 
 import numpy as np
-import pandas as pd
+from scipy.sparse import dok_matrix, save_npz
 from tqdm import tqdm
 
 def get_dict(filename: str) -> dict:
@@ -34,17 +34,14 @@ def get_unique_family_members(dict: dict) -> list:
 dict = get_dict('../data/tous_individus_pro1931-60_SAG.asc')
 unique_family_members = get_unique_family_members(dict)
 
-df = pd.DataFrame(np.nan, index=unique_family_members, columns=unique_family_members)
+matrix = dok_matrix((len(unique_family_members), len(unique_family_members)), dtype=np.float32)
 
 for filename in tqdm(listdir('../results/kinships/'), "Compiling the DataFrame"):
     with open(f"../results/kinships/{filename}", 'r') as infile:
         for line in infile:
             proband1, proband2, kinship = line.strip().split()
-            df.at[int(proband1), int(proband2)] = float(kinship)
-            df.at[int(proband2), int(proband1)] = float(kinship)
+            matrix[int(proband1), int(proband2)] = float(kinship)
+            matrix[int(proband2), int(proband1)] = float(kinship)
 
-print(df.isnull().any().any())
-
-print(df)
-
-df.to_pickle('../results/kinships.pkl')
+matrix = matrix.tocoo()
+save_npz('../results/kinships.npz', matrix)
