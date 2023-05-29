@@ -1,6 +1,7 @@
-from functools import cache
-from sys import argv
+from os import listdir
 
+import numpy as np
+import pandas as pd
 from tqdm import tqdm
 
 def get_dict(filename: str) -> dict:
@@ -30,42 +31,20 @@ def get_unique_family_members(dict: dict) -> list:
                 visited_parents.add((father, mother))
         return unique_family_members
 
-@cache
-def get_kinship(individual1: int, individual2: int) -> float:
-    """A recursive version of kinship coefficients from R's GENLIB library (Gauvin et al., 2015)."""
-    if individual1 == individual2:
-        father, mother, _ = dict[individual1]
-        if father and mother:
-                value = get_kinship(father, mother)
-        else:
-            value = 0.
-        return (1 + value) * 0.5
-    
-    if dict[individual2][2] > dict[individual1][2]:
-        individual1, individual2 = individual2, individual1
-
-    father, mother, _ = dict[individual1]
-    if not father and not mother:
-        return 0.
-    
-    mother_value = 0.
-    father_value = 0.
-    if mother:
-        mother_value = get_kinship(mother, individual2)
-    if father:
-        father_value = get_kinship(father, individual2)
-
-    return (father_value + mother_value) / 2.
-
 dict = get_dict('../data/tous_individus_pro1931-60_SAG.asc')
 unique_family_members = get_unique_family_members(dict)
 
-range = int(argv[1])*1000
+df = pd.DataFrame(np.nan, index=unique_family_members, columns=unique_family_members)
 
-for pro1 in tqdm(unique_family_members[range:range+1000]):
-    with open(f'../results/kinships/kinships_{pro1}', 'w') as outfile:
-        for pro2 in unique_family_members:
-            if pro1 <= pro2:
-                kinship = get_kinship(pro1, pro2)
-                outfile.write(f'{pro1} {pro2} {kinship}\n')
-    get_kinship.cache_clear()
+for filename in tqdm(listdir('../results/kinships/'), "Compiling the DataFrame"):
+    with open(f"../results/kinships/{filename}", 'r') as infile:
+        for line in infile:
+            proband1, proband2, kinship = line.strip().split()
+            df.at[int(proband1), int(proband2)] = float(kinship)
+            df.at[int(proband2), int(proband1)] = float(kinship)
+
+print(df.isnull().any().any())
+
+print(df)
+
+df.to_pickle('../results/kinships.pkl')
