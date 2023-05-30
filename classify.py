@@ -1,9 +1,10 @@
 from enum import Enum
 
-import numpy as np
 from scipy.sparse import load_npz
-import n2d
-np.random.seed(0)
+from sklearn.neural_network import MLPClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+import pandas as pd
 
 def get_dict(filename: str) -> dict:
     """Converts lines from the file into a dictionary of parents and indices."""
@@ -186,8 +187,13 @@ mrc = {
      City.MONT_APICA.value: MRC.LAC_SAINT_JEAN_EST.value
 }
 
+print("Loading the matrix...")
 matrix = load_npz('../results/kinships.npz')
-x = matrix.toarray()
+
+print("Transforming the sparse matrix to an array...")
+X = matrix.toarray()
+
+print("Preparing the labels")
 y = [mrc[city] for city in cities]
 y_names = {
      MRC.HORS_MRC.value: "Mashteuiatsh",
@@ -198,16 +204,23 @@ y_names = {
      MRC.SAGUENAY.value: "Saguenay"
 }
 
-n_clusters = 6
-latent_dim = n_clusters
+print("Splitting the data into train and test sets...")
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
 
-ae = n2d.AutoEncoder(x.shape[-1], latent_dim)
+print("Preparing the model...")
+model = MLPClassifier(random_state=42, verbose=True, shuffle=True).fit(X_train, y_train)
 
-manifoldGMM = n2d.UmapGMM(n_clusters)
+print("Testing the model...")
+y_pred = model.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred)
+precision, recall, fscore, _ = precision_recall_fscore_support(y_test, y_pred)
 
-sagcluster = n2d.n2d(ae, manifoldGMM)
+print(f"TEST RESULTS\nAccuracy: {accuracy}\nPrecision: {precision}\nRecall: {recall}\nF-score: {fscore}")
 
-sagcluster.fit(x, weight_id = "weights/SAG-1000-ae_weights.h5", patience=10)
-sagcluster.fit(x, weights = "weights/SAG-1000-ae_weights.h5", patience=10)
+real = pd.DataFrame([y_names[y] for y in y_test]).value_counts()
+predicted = pd.DataFrame([y_names[y] for y in y_pred]).value_counts()
+print("Real values:")
+print(real)
+print("Predicted values:")
+print(predicted)
 
-n2d.save_n2d(sagcluster, encoder_id='models/sag.h5', manifold_id='models/saggmm.sav')
