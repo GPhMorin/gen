@@ -1,10 +1,12 @@
 from enum import Enum
 
 from scipy.sparse import load_npz
-from sklearn.neural_network import MLPClassifier
+from sklearn.svm import LinearSVC
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
 import pandas as pd
+import numpy as np
 
 def get_dict(filename: str) -> dict:
     """Converts lines from the file into a dictionary of parents and indices."""
@@ -194,7 +196,7 @@ print("Transforming the sparse matrix to an array...")
 X = matrix.toarray()
 
 print("Preparing the labels")
-y = [mrc[city] for city in cities]
+y = np.array([mrc[city] for city in cities])
 y_names = {
      MRC.HORS_MRC.value: "Mashteuiatsh",
      MRC.LAC_SAINT_JEAN_EST.value: "Lac-Saint-Jean-Est",
@@ -204,11 +206,20 @@ y_names = {
      MRC.SAGUENAY.value: "Saguenay"
 }
 
+print("Removing empty data...")
+indices = np.where(np.sum(matrix, axis=1) == 0.5)[0]
+X = np.delete(X, indices, axis=0)
+X = np.delete(X, indices, axis=1)
+y = np.delete(y, indices, axis=0)
+
+print("Standard scaler...")
+X = StandardScaler().fit_transform(X)
+
 print("Splitting the data into train and test sets...")
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
 
 print("Preparing the model...")
-model = MLPClassifier(random_state=42, verbose=True, shuffle=True).fit(X_train, y_train)
+model = LinearSVC(random_state=42, verbose=True).fit(X_train, y_train)
 
 print("Testing the model...")
 y_pred = model.predict(X_test)
@@ -224,3 +235,6 @@ print(real)
 print("Predicted values:")
 print(predicted)
 
+print("Confusion matrix:")
+confusion = confusion_matrix(y_test, y_pred)
+print(confusion)

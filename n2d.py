@@ -1,11 +1,9 @@
 from enum import Enum
 
-from scipy.sparse import load_npz
 import numpy as np
-from sklearn.decomposition import PCA
-from umap import UMAP
-import matplotlib.pyplot as plt
-import seaborn as sns
+from scipy.sparse import load_npz
+import n2d
+np.random.seed(0)
 
 def get_dict(filename: str) -> dict:
     """Converts lines from the file into a dictionary of parents and indices."""
@@ -22,10 +20,11 @@ def get_probands(dict: dict) -> list:
         probands = set(dict.keys()) - {parent for individual in dict.keys() for parent in dict[individual][:2] if parent}
         return sorted(list(probands))
 
-def get_unique_family_members(dict: dict, probands: list) -> list:
+def get_unique_family_members(dict: dict) -> list:
         """Limits families to one member each."""
         visited_parents = set()
         unique_family_members = []
+        probands = get_probands(dict)
         for proband in probands:
             father, mother, _ = dict[proband]
             if (father, mother) not in visited_parents:
@@ -43,44 +42,8 @@ def get_city(filename: str) -> dict:
             dict[int(line[0])] = int(line[4])
     return dict
 
-def get_sedentary_families(dict: dict, probands: list) -> list:
-    "Limits probands to those who married at the same place as their parents."
-    sedentary_probands = []
-    city = get_city('../data/tous_individus_dates_locations.txt')
-    for proband in probands:
-         father, mother, _ = dict[proband]
-         try:
-              probands_city = city[proband]
-              fathers_city = city[father]
-              mothers_city = city[mother]
-         except KeyError:
-              continue
-         if probands_city == fathers_city == mothers_city:
-              sedentary_probands.append(proband)
-    return sedentary_probands
-
-def convert_indices(dict: dict) -> dict:
-     """Return the index of a sibling if that sibling is the unique family member."""
-     map = {}
-     probands = get_probands(dict)
-     unique_family_members = get_unique_family_members(dict, probands)
-     visited_parents = {}
-     for proband in probands:
-          father, mother, _ = dict[proband]
-          if (father, mother) not in visited_parents:
-               index = unique_family_members.find(proband)
-               map[proband] = index
-               visited_parents[(father, mother)] = index
-          else:
-               index = visited_parents[(father, mother)]
-               map[proband] = index
-     return map
-
 dict = get_dict('../data/tous_individus_pro1931-60_SAG.asc')
-probands = get_probands(dict)
-sedentary_probands = get_sedentary_families(dict, probands)
-unique_family_members = get_unique_family_members(dict, sedentary_probands)
-indices = [map[proband] for proband in unique_family_members]
+unique_family_members = get_unique_family_members(dict)
 city = get_city('../data/tous_individus_dates_locations.txt')
 cities = [city[individual] for individual in unique_family_members]
 
@@ -223,14 +186,9 @@ mrc = {
      City.MONT_APICA.value: MRC.LAC_SAINT_JEAN_EST.value
 }
 
-print("Loading the matrix...")
 matrix = load_npz('../results/kinships.npz')
-
-print("Transforming the sparse matrix to an array...")
-X = matrix.toarray()
-
-print("Preparing the labels")
-y = np.array([mrc[city] for city in cities])
+x = matrix.toarray()
+y = [mrc[city] for city in cities]
 y_names = {
      MRC.HORS_MRC.value: "Mashteuiatsh",
      MRC.LAC_SAINT_JEAN_EST.value: "Lac-Saint-Jean-Est",
@@ -240,30 +198,16 @@ y_names = {
      MRC.SAGUENAY.value: "Saguenay"
 }
 
-''' Useful when not selecting probands
-print("Removing empty data...")
-indices = np.where(np.sum(matrix, axis=1) == 0.5)[0]
-X = np.delete(X, indices, axis=0)
-X = np.delete(X, indices, axis=1)
-y = np.delete(y, indices, axis=0)
-'''
+n_clusters = 6
+latent_dim = n_clusters
 
-probands = get_probands(dict)
-original_probands = get_unique_family_members(dict, probands)
-indices = [index for index, original_proband in enumerate(original_probands) if original_proband not in sedentary_probands]
-X = np.delete(X, indices, axis=0)
-X = np.delete(X, indices, axis=1)
+ae = n2d.AutoEncoder(x.shape[-1], latent_dim)
 
-indices_saguenay = [index for index, mrc in enumerate(y) if mrc == MRC.SAGUENAY.value]
-X = np.delete(X, indices_saguenay, axis=0)
-X = np.delete(X, indices_saguenay, axis=1)
-y = np.delete(y, indices_saguenay, axis=0)
+manifoldGMM = n2d.UmapGMM(n_clusters)
 
-print("Reducing the dimensionality...")
-pca = PCA(n_components=0.95, random_state=42).fit_transform(X)
-print(pca.shape)
-emb = UMAP(verbose=True, random_state=42).fit_transform(pca)
+sagcluster = n2d.n2d(ae, manifoldGMM)
 
-print("Generating the scatter plot...")
-sns.scatterplot(x=emb[:, 0], y=emb[:, 1], hue=[y_names[y_value] for y_value in y])
-plt.savefig("TSNE.png")
+sagcluster.fit(x, weight_id = "weights/SAG-1000-ae_weights.h5", patience=10)
+sagcluster.fit(x, weights = "weights/SAG-1000-ae_weights.h5", patience=10)
+
+n2d.save_n2d(sagcluster, encoder_id='models/sag.h5', manifold_id='models/saggmm.sav')
