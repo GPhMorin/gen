@@ -11,23 +11,23 @@ def get_dict(filename: str) -> dict:
     """Converts lines from the file into a dictionary of parents and indices."""
     with open(filename, 'r') as infile:
         lines = infile.readlines()[1:]
-    dict = {}
+    data = {}
     for index, line in enumerate(lines):
         child, father, mother, _ = line.strip().split('\t')
-        dict[int(child)] = (int(father), int(mother), index)
-    return dict
+        data[int(child)] = (int(father), int(mother), index)
+    return data
 
-def get_probands(dict: dict) -> list:
+def get_probands(data: dict) -> list:
         """Extracts the probands as an ordered list."""
-        probands = set(dict.keys()) - {parent for individual in dict.keys() for parent in dict[individual][:2] if parent}
+        probands = set(data.keys()) - {parent for individual in data.keys() for parent in data[individual][:2] if parent}
         return sorted(list(probands))
 
-def get_unique_family_members(dict: dict, probands: list) -> list:
+def get_unique_family_members(data: dict, probands: list) -> list:
         """Limits families to one member each."""
         visited_parents = set()
         unique_family_members = []
         for proband in probands:
-            father, mother, _ = dict[proband]
+            father, mother, _ = data[proband]
             if (father, mother) not in visited_parents:
                 unique_family_members.append(proband)
                 visited_parents.add((father, mother))
@@ -35,52 +35,59 @@ def get_unique_family_members(dict: dict, probands: list) -> list:
 
 def get_city(filename: str) -> dict:
     """Converts cities from the file into a dictionary of cities and IDs."""
-    dict = {}
+    data = {}
     with open(filename, 'r') as infile:
         lines = infile.readlines()[1:]
         for line in lines:
             line = line.strip().split('\t')
-            dict[int(line[0])] = int(line[4])
-    return dict
+            data[int(line[0])] = int(line[4])
+    return data
 
-def get_sedentary_families(dict: dict, probands: list) -> list:
+def get_sedentary_families(data: dict, probands: list) -> list:
     "Limits probands to those who married at the same place as their parents."
     sedentary_probands = []
     city = get_city('../data/tous_individus_dates_locations.txt')
     for proband in probands:
-         father, mother, _ = dict[proband]
+         father, mother, _ = data[proband]
          try:
               probands_city = city[proband]
               fathers_city = city[father]
               mothers_city = city[mother]
+              p_grandfather, p_grandmother, _ = data[father]
+              m_grandfather, m_grandmother, _ = data[mother]
+              p_grandfathers_city = city[p_grandfather]
+              p_grandmothers_city = city[p_grandmother]
+              m_grandfathers_city = city[m_grandfather]
+              m_grandmothers_city = city[m_grandmother]
          except KeyError:
               continue
-         if probands_city == fathers_city == mothers_city:
+         if probands_city == fathers_city == mothers_city == p_grandfathers_city == p_grandmothers_city == m_grandfathers_city == m_grandmothers_city:
               sedentary_probands.append(proband)
     return sedentary_probands
 
-def convert_indices(dict: dict) -> dict:
+def convert_indices(data: dict) -> dict:
      """Return the index of a sibling if that sibling is the unique family member."""
-     map = {}
-     probands = get_probands(dict)
-     unique_family_members = get_unique_family_members(dict, probands)
+     idx_map = {}
+     probands = get_probands(data)
+     unique_family_members = get_unique_family_members(data, probands)
      visited_parents = {}
      for proband in probands:
-          father, mother, _ = dict[proband]
+          father, mother, _ = data[proband]
           if (father, mother) not in visited_parents:
-               index = unique_family_members.find(proband)
-               map[proband] = index
+               index = unique_family_members.index(proband)
+               idx_map[proband] = index
                visited_parents[(father, mother)] = index
           else:
                index = visited_parents[(father, mother)]
-               map[proband] = index
-     return map
+               idx_map[proband] = index
+     return idx_map
 
-dict = get_dict('../data/tous_individus_pro1931-60_SAG.asc')
-probands = get_probands(dict)
-sedentary_probands = get_sedentary_families(dict, probands)
-unique_family_members = get_unique_family_members(dict, sedentary_probands)
-indices = [map[proband] for proband in unique_family_members]
+data = get_dict('../data/tous_individus_pro1931-60_SAG.asc')
+probands = get_probands(data)
+sedentary_probands = get_sedentary_families(data, probands)
+unique_family_members = get_unique_family_members(data, sedentary_probands)
+idx_map = convert_indices(data)
+indices = [idx_map[proband] for proband in unique_family_members]
 city = get_city('../data/tous_individus_dates_locations.txt')
 cities = [city[individual] for individual in unique_family_members]
 
@@ -248,16 +255,26 @@ X = np.delete(X, indices, axis=1)
 y = np.delete(y, indices, axis=0)
 '''
 
+'''
 probands = get_probands(dict)
 original_probands = get_unique_family_members(dict, probands)
 indices = [index for index, original_proband in enumerate(original_probands) if original_proband not in sedentary_probands]
 X = np.delete(X, indices, axis=0)
 X = np.delete(X, indices, axis=1)
+'''
 
+'''
 indices_saguenay = [index for index, mrc in enumerate(y) if mrc == MRC.SAGUENAY.value]
 X = np.delete(X, indices_saguenay, axis=0)
 X = np.delete(X, indices_saguenay, axis=1)
 y = np.delete(y, indices_saguenay, axis=0)
+'''
+
+X = X[indices, :]
+X = X[:, indices]
+
+print(X.shape)
+print(len(y))
 
 print("Reducing the dimensionality...")
 pca = PCA(n_components=0.95, random_state=42).fit_transform(X)
